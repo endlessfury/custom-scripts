@@ -1,0 +1,38 @@
+#!/bin/bash
+
+timeout=1
+
+declare -a myServers=("VMC2NRM01" "VMC2NRM02" "VMC2NRM03" "VMC2NRM04" "VMC2NRM05" "VMC2NRM06" "VMC2RAC01" "VMC2RAC02" "VMC2RAC03" "VMC2RAC04" "VMC2ETL01" "VMC2TIB12" "VMC2TIB13" "VMC2TIB14" "VMC2TIB15" "VMC2TIB20");
+declare -a myPorts=("22" "22" "22" "22" "22" "22" "1521" "1521" "1521" "1521" "22" "22" "22" "22" "22" "22" "22" "22" "22" "22" "22" "22" "22" "22" "22" "22" "22" "22" "22" "22" "22" "22" "22" "22" "22" "22" "22" "22" "22" "22" "22");
+declare -a failedServers=();
+	
+	
+		portIndex=0;
+		for server in ${myServers[@]};do 
+			if [[ "$HOSTNAME" != "$server" ]]; then
+				if [ "$1" == "1" ]; then 
+					echo "Testing: telnet $server ${myPorts[$portIndex]}  " 
+					RES=`timeout --signal=9 $timeout telnet $server ${myPorts[$portIndex]}`
+					if [[ "$RES" == "" ]]; then
+						echo "telnet: connect to address $server: timeout";
+					fi
+				else
+                 			RES=`timeout --signal=9 3 telnet $server ${myPorts[$portIndex]} 2>&1 | grep -Ew "Connected"`;
+				fi
+				if [[ "$RES" != *"Connected"* ]]; then
+					# echo "not connected";
+					failedServers+=("$server");
+					# echo ${failedServers[@]};
+				fi 
+			fi
+			((portIndex+=1))
+		done
+
+if [ ${#failedServers[@]} -gt 0 ]; then
+	echo 'Connectivity check <font color=red><b>failed</b></font> for:';
+	for fail in ${failedServers[@]}; do
+		echo $(theIP=`echo $SSH_CONNECTION | awk '{ print $3 }'`; echo "Source IP: $theIP ($HOSTNAME), Destination: "$fail);
+	done
+	exit 9
+fi
+

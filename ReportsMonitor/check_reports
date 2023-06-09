@@ -1,0 +1,145 @@
+#!/bin/bash
+
+. $HOME/.bash_profile
+
+parameter=$1
+
+# declare generation logfile
+GEN_LOG_FILE='<logger_absolute_path>/generation.log'
+MONITOR_OUTPUT=`realpath .`/<html_message_file>;
+NRMReportsExecutor_LOC=<ReportsExecutor_tool_path>
+scriptPath=`realpath .`
+
+# clear the monitor_output file
+/bin/cat /dev/null > $MONITOR_OUTPUT;
+
+# declare dynamic arrays
+declare -a mySQLs=();
+declare -a myReports=();
+declare -a myLastReport=(); # flag if last report exist
+declare -a myPreviousReport=(); # flag if prevrious report exist
+declare -a fileSizeTresholds=(); # alert tresholds
+declare -a fileRowsTresholds=(); # alert tresholds
+declare -a lockFileSizeTresholds=(); # report block treshold
+declare -a lockFileRowsTresholds=(); # report block treshold
+declare -a myFileSizeChangeRate=(); # calculated change rate, not absolute
+declare -a myFileRowsChangeRate=(); # calculated change rate, not absolute
+
+function readFromCSV
+{
+	CSVFileName=$1;
+	mySQLs=($(cat $CSVFileName | awk -F, '{print $1}' | tail -n +2));
+	myReports=($(cat $CSVFileName | awk -F, '{print $2}' | tail -n +2));
+	fileSizeTresholds=($(cat $CSVFileName | awk -F, '{print $3}' | tail -n +2));
+	lockFileSizeTresholds=($(cat $CSVFileName | awk -F, '{print $4}' | tail -n +2));
+	fileRowsTresholds=($(cat $CSVFileName | awk -F, '{print $5}' | tail -n +2));
+	lockFileRowsTresholds=($(cat $CSVFileName | awk -F, '{print $6}' | tail -n +2));
+}
+function checkReports
+{
+	indexOfTheReport=0;
+	for report in ${myReports[@]};do 
+	#echo "Checking report: $report " 
+	# first check if last two reports exist
+		reportCheck=`grep $report $GEN_LOG_FILE | tail -2`;
+		firstReport=`echo $reportCheck | grep $theDate;`;
+		if [ -z "$firstReport" ]; then
+			myLastReport+=("0");
+		else
+			myLastReport+=("1");
+		fi
+		secondReport=`echo $reportCheck | grep $theDateBefore;`;
+		if [ -z "$firstReport" ]; then
+			myPreviousReport+=("0");
+		else
+			myPreviousReport+=("1");
+		fi
+	# check file size even if the last 2 files are not correct - to make script simplier
+		numberOne=`echo $reportCheck | awk '{print $1}'`
+		numberTwo=`echo $reportCheck | awk '{print $5}'`
+		#echo $reportCheck"["$numberOne","$numberTwo"]"; # debug output
+		myFileSizeChangeRate+=("`bc <<< 'scale=1; '$numberOne'-'$numberTwo`")
+	# check rows number even if the last 2 files are not correct - to make script simplier
+		numberOne=`echo $reportCheck | awk '{print $2}'`
+		numberTwo=`echo $reportCheck | awk '{print $6}'`
+		#echo $reportCheck"["$numberOne","$numberTwo"]"; # debug output
+		myFileRowsChangeRate+=("`bc <<< 'scale=1; '$numberOne'-'$numberTwo`")
+		#echo $report" "${myLastReport[$indexOfTheReport]}" "${myPreviousReport[$indexOfTheReport]}" "$myFileSizeChangeRate" "$myFileRowsChangeRate; # debug output	
+		((indexOfTheReport+=1))
+	done
+}
+
+function createStatus
+{
+	indexOfTheReport=0;
+	for report in ${myReports[@]};do 
+		if [ "${myLastReport[$indexOfTheReport]}" == "1" ]; then
+			if [ "${myPreviousReport[$indexOfTheReport]}" == "1" ]; then
+				# count absolute values
+				absoluteOfSizeChange=`echo ${myFileSizeChangeRate[$indexOfTheReport]} | awk '{ print ($1 >= 0) ? $1 : 0 - $1}'`;
+				absoluteOfRowsChange=`echo ${myFileRowsChangeRate[$indexOfTheReport]} | awk '{ print ($1 >= 0) ? $1 : 0 - $1}'`;
+				echo $report" "${myLastReport[$indexOfTheReport]}" "${myPreviousReport[$indexOfTheReport]}" "$absoluteOfSizeChange" "$absoluteOfRowsChange >> $scriptPath/debug.log # debug output
+				if [ $absoluteOfSizeChange -ge ${lockFileSizeTresholds[$indexOfTheReport]} ]; then
+					echo -e "<font size="3"><li>"${myReports[$indexOfTheReport]}" report file has changed in: "${myFileSizeChangeRate[$indexOfTheReport]}"KB and "${myFileRowsChangeRate[$indexOfTheReport]}" rows</li></font></i>" >> $MONITOR_OUTPUT
+					echo -e "<i>Lockdown treshold for the filesize is: "${lockFileSizeTresholds[$indexOfTheReport]}"</i><br>" >> $MONITOR_OUTPUT
+					mv $NRMReportsExecutor_LOC/SQLs/${mySQLs[$indexOfTheReport]} $NRMReportsExecutor_LOC/blockedSQLs &&
+					echo -e "<i><font size="3" color="red">${mySQLs[$indexOfTheReport]} has been locked by moving to $NRMReportsExecutor_LOC/blockedSQLs</font><br></i>" >> $MONITOR_OUTPUT
+					exitFlag="5";
+				elif [ $absoluteOfRowsChange -ge ${lockFileRowsTresholds[$indexOfTheReport]} ]; then
+					echo -e "<font size="3"><li>"${myReports[$indexOfTheReport]}" report file has changed in: "${myFileSizeChangeRate[$indexOfTheReport]}"KB and "${myFileRowsChangeRate[$indexOfTheReport]}" rows</li></font></i>" >> $MONITOR_OUTPUT
+					echo -e "<i>Lockdown treshold for the rows number is: "${lockFileRowsTresholds[$indexOfTheReport]}"</i><br>" >> $MONITOR_OUTPUT
+					mv $NRMReportsExecutor_LOC/SQLs/${mySQLs[$indexOfTheReport]} $NRMReportsExecutor_LOC/blockedSQLs &&
+					echo -e "<i><font size="3" color="red">${mySQLs[$indexOfTheReport]} has been locked by moving to $NRMReportsExecutor_LOC/blockedSQLs</font><br></i>" >> $MONITOR_OUTPUT
+					exitFlag="6";
+				elif [ $absoluteOfSizeChange -ge ${fileSizeTresholds[$indexOfTheReport]} ]; then
+					echo -e "<font size="3"><li>"${myReports[$indexOfTheReport]}" report file has changed in: "${myFileSizeChangeRate[$indexOfTheReport]}"KB and "${myFileRowsChangeRate[$indexOfTheReport]}" rows</li></font></i>" >> $MONITOR_OUTPUT
+					echo -e "<i>Treshold for the filesize is: "${fileSizeTresholds[$indexOfTheReport]}"<br></i>" >> $MONITOR_OUTPUT
+					exitFlag="3";
+				elif [ $absoluteOfRowsChange -ge ${fileRowsTresholds[$indexOfTheReport]} ]; then
+					echo -e "<font size="3"><li>"${myReports[$indexOfTheReport]}" report file has changed in: "${myFileRChangeRate[$indexOfTheReport]}"KB and "${myFileRowsChangeRate[$indexOfTheReport]}" rows</li></font></i>" >> $MONITOR_OUTPUT
+					echo -e "<i>Treshold for the rows number is: "${fileRowsTresholds[$indexOfTheReport]}"<br></i>" >> $MONITOR_OUTPUT
+					exitFlag="4";
+				fi
+			else
+				exitFlag="2";
+			fi
+		else
+			exitFlag=1;
+		fi
+		((indexOfTheReport+=1))
+	done
+}
+
+function addHeaders 
+{
+	if [ "$exitFlag" == "1" ]; then
+		sed -i '1i<font size="6" color="red"><b>One of the defined reports had not been created</b></font><br><br><ul>' $MONITOR_OUTPUT
+	elif [ "$exitFlag" == "2" ]; then
+		sed -i '1i<font size="6" color="red"><b>One of the defined reports had not been created before the newest one</b></font><br><br><ul>' $MONITOR_OUTPUT
+	elif [ "$exitFlag" == "4" ]; then
+		sed -i '1i<font size="6" color="red"><b>One of the defined reports has crossed its rows treshold</b></font><br><br><ul>' $MONITOR_OUTPUT
+	elif [ "$exitFlag" == "3" ]; then
+		sed -i '1i<font size="6" color="red"><b>One of the defined reports has crossed its size treshold</b></font><br><br><ul>' $MONITOR_OUTPUT
+	elif [ "$exitFlag" == "5" ]; then
+		sed -i '1i<font size="6" color="red"><b>One of the defined reports has crossed its lockdown rows treshold and has been switched off</b></font><br><br><ul>' $MONITOR_OUTPUT
+	elif [ "$exitFlag" == "6" ]; then
+		sed -i '1i<font size="6" color="red"><b>One of the defined reports has crossed its lockdown size treshold and has been switched off</b></font><br><br><ul>' $MONITOR_OUTPUT
+	fi
+}
+
+# set todays and the the before date
+theDate=`date +%Y%m%d`;
+theDateBefore=`date +%Y%m%d --date='-1 day'`;
+
+cat /dev/null > $scriptPath/debug.log
+	
+exitFlag="0";
+
+readFromCSV tresholds.csv
+checkReports
+createStatus
+addHeaders
+
+if [ "$exitFlag" != "0" ]; then
+	exit 9;
+fi

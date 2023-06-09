@@ -1,0 +1,39 @@
+#!/bin/bash
+reportName=$1
+reportPath=<report_path>/$2
+scriptPath=`realpath .`
+mailList=$3
+logFile=<report_log_location>/$reportName".log"
+destDir="<report_generation_server>"
+if [ ! -z "$4" ]; then
+	timePeriod=$4
+else
+	timePeriod="30"
+fi
+
+tempFileNameSSH=`ssh $destDir "find $reportPath -iname "*$reportName*" -type f -mmin -$timePeriod"`; 
+fileNameSSH=`echo $tempFileNameSSH | awk '{print $NF}'`;
+
+#echo $tempFileNameSSH
+#echo $fileNameSSH
+
+scp -q $destDir:$fileNameSSH $scriptPath
+
+fileName=`find $scriptPath -iname $(echo ${fileNameSSH##*/})`
+#echo $fileName $scriptPath
+
+if [ ! -z "$fileName" ];then
+	/bin/python $scriptPath/mail_multiple.py $fileName $reportName "$scriptPath/recipients/$mailList.txt" `echo ${fileName##*/}`
+	if [ $? -eq 0 ];then
+		echo "Email towards [$mailList] containing file [${fileName##*/}] has been sent on [$(date +%Y%m%d_%H%M%S)]" >> $logFile
+	fi
+else
+	echo "Email towards [$mailList] cannot be send due to missing report [$reportName] in the directory within time period of [$timePeriod min], date [$(date +%Y%m%d_%H%M%S)]" >> $logFile
+	echo "<html><h3>Email towards [$mailList] cannot be send due to missing report [$reportName] in the directory within time period of [$timePeriod min], date [$(date +%Y%m%d_%H%M%S)]</h3><br><br><hr>Details in: /<report_generation_path>/$reportName.log</html>" > $scriptPath/message_error.txt
+	/bin/python $scriptPath/mail_support.py "$scriptPath/recipients/support.txt" $reportName
+fi
+
+if [ ! -z "$fileName" ]; then
+	#rm -v $fileName
+	echo "remove "$fileName;
+fi

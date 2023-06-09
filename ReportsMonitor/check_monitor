@@ -1,0 +1,11 @@
+#!/bin/bash
+
+/bin/bash -c <path_to_script>/ReportsMonitor/check_reports
+exit_status=$?;
+#echo "Exit: "$exit_status;
+sed -i -e ':a' -e 'N;$!ba' -e  's/\n/"<br>\n/g' <path_to_script>/ReportsMonitor/monitor_output.txt
+sed -i 's/\"//g' <path_to_script>/ReportsMonitor/monitor_output.txt
+if [ $exit_status -eq 9 ];then
+echo "mail sent "$(date);
+/bin/python <path_to_script>/ReportsMonitor/mail_multiple.py
+fi

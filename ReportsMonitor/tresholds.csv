@@ -1,0 +1,2 @@
+SQL,reportName,fileSizeTresholds,lockFileSizeTresholds,fileRowsTresholdsx,lockFileRowsTresholds
+test.sql,test_export_name,500,1000,2000,4000

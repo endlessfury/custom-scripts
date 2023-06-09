@@ -1,0 +1,5 @@
+<html>
+<h1>Hello, this is <i>ReportSender tool</i> from NRM.</h1>
+<h3>If you have recieved this email you are on the recipient list of the report.</h3>
+<hr>For any issues please contact: chariot.support@comarch.com
+</html>
